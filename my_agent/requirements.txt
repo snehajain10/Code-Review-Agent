@@ -1,0 +1,4 @@
+google-adk
+litellm
+duckduckgo-search
+python-dotenv

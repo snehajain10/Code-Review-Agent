@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Code Review</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+
+    <aside class="sidebar">
+      <div class="logo">
+        <div class="logo-mark"></div>
+        <span class="logo-text">CodeReview AI</span>
+      </div>
+      <nav class="nav">
+        <button class="nav-btn active" data-view="review">Code Review</button>
+        <button class="nav-btn" data-view="history">History</button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="status-dot" id="serverStatus"></div>
+        <span id="serverStatusText">Connecting...</span>
+      </div>
+    </aside>
+
+    <main class="main">
+
+      <header class="header">
+        <h1>AI Code Review System</h1>
+        <p class="subtitle">Powered by Google ADK + Gemini</p>
+      </header>
+
+      <!-- Step 1: Input -->
+      <section class="card" id="stepInput">
+        <div class="card-header">
+          <span class="step-badge">01</span>
+          <h2>Choose Your Project</h2>
+        </div>
+        <div class="input-tabs">
+          <button class="tab-btn active" data-tab="local">Local Folder</button>
+          <button class="tab-btn" data-tab="github">GitHub URL</button>
+        </div>
+        <div class="tab-content active" id="tab-local">
+          <input type="text" id="localPath" class="path-input"
+            placeholder="e.g. C:\Users\me\my-project" />
+          <p class="hint">Enter the full path to your project folder</p>
+        </div>
+        <div class="tab-content" id="tab-github">
+          <input type="text" id="githubUrl" class="path-input"
+            placeholder="e.g. https://github.com/owner/repo" />
+          <p class="hint">Paste any public GitHub repository URL</p>
+        </div>
+        <button class="btn btn-primary" id="btnStart">Start Analysis</button>
+      </section>
+
+      <!-- Step 2: Pipeline -->
+      <section class="card hidden" id="stepPipeline">
+        <div class="card-header">
+          <span class="step-badge">02</span>
+          <h2>Analysis Pipeline</h2>
+        </div>
+        <div class="pipeline">
+          <div class="pipeline-step" id="ps-scan">
+            <div class="ps-num">1</div>
+            <div class="ps-label">Scan</div>
+            <div class="ps-status">waiting</div>
+          </div>
+          <div class="pipeline-arrow"></div>
+          <div class="pipeline-step" id="ps-security">
+            <div class="ps-num">2</div>
+            <div class="ps-label">Security</div>
+            <div class="ps-status">waiting</div>
+          </div>
+          <div class="pipeline-arrow"></div>
+          <div class="pipeline-step" id="ps-docker">
+            <div class="ps-num">3</div>
+            <div class="ps-label">Docker</div>
+            <div class="ps-status">waiting</div>
+          </div>
+          <div class="pipeline-arrow"></div>
+          <div class="pipeline-step" id="ps-tests">
+            <div class="ps-num">4</div>
+            <div class="ps-label">Tests</div>
+            <div class="ps-status">waiting</div>
+          </div>
+        </div>
+
+        <div class="action-grid hidden" id="actionGrid">
+          <button class="action-card" id="btnSecurity">
+            <div class="action-title">Security Review</div>
+            <div class="action-desc">Scan for vulnerabilities, generate docs and requirements.txt</div>
+          </button>
+          <button class="action-card" id="btnDocker">
+            <div class="action-title">Dockerize</div>
+            <div class="action-desc">Create Dockerfile, build and run the container</div>
+          </button>
+          <button class="action-card" id="btnTests">
+            <div class="action-title">Generate Tests</div>
+            <div class="action-desc">Auto-generate edge case tests and run them</div>
+          </button>
+          <button class="action-card action-card-all" id="btnAll">
+            <div class="action-title">Run Everything</div>
+            <div class="action-desc">Security + Docker + Tests in sequence</div>
+          </button>
+        </div>
+      </section>
+
+      <!-- Step 3: Output -->
+      <section class="card hidden" id="stepOutput">
+        <div class="card-header">
+          <span class="step-badge">03</span>
+          <h2>Results</h2>
+          <button class="btn btn-sm" id="btnCopy">Copy</button>
+        </div>
+        <div class="output-tabs">
+          <button class="out-tab active" data-out="formatted">Formatted</button>
+          <button class="out-tab" data-out="raw">Raw</button>
+        </div>
+        <div id="outputFormatted" class="output-box formatted-output"></div>
+        <div id="outputRaw" class="output-box raw-output hidden"></div>
+        <div class="spinner hidden" id="spinner">
+          <div class="spinner-ring"></div>
+          <span id="spinnerText">Processing...</span>
+        </div>
+      </section>
+
+      <!-- Step 4: Summary -->
+      <section class="card hidden" id="stepSummary">
+        <div class="card-header">
+          <span class="step-badge">04</span>
+          <h2>Summary</h2>
+        </div>
+        <div id="summaryContent"></div>
+        <div class="summary-actions">
+          <button class="btn btn-secondary" id="btnNewReview">New Review</button>
+          <button class="btn btn-primary" id="btnAskQuestion">Ask a Question</button>
+        </div>
+      </section>
+
+      <!-- Ask Question -->
+      <section class="card hidden" id="stepQuestion">
+        <div class="card-header">
+          <h2>Ask About This Project</h2>
+        </div>
+        <div class="quick-questions">
+          <button class="quick-q" data-q="What does this project do?">What does this project do?</button>
+          <button class="quick-q" data-q="What vulnerabilities were found?">What vulnerabilities were found?</button>
+          <button class="quick-q" data-q="How do I run this project?">How do I run this project?</button>
+          <button class="quick-q" data-q="What are the main dependencies?">What are the main dependencies?</button>
+        </div>
+        <div class="question-input-row">
+          <input type="text" id="questionInput" class="path-input" placeholder="Ask anything about the project..." />
+          <button class="btn btn-primary" id="btnAsk">Ask</button>
+        </div>
+        <div id="questionOutput" class="output-box formatted-output hidden"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
