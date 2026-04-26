@@ -1,0 +1,30 @@
+# Env files
+.env
+.env.*
+
+# Kiro files
+.kiro/
+kiro/
+*.kiro
+
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db.env
+.env.*
+.kiro/
+kiro/
+*.kiro
+__pycache__/
+*.pyc
+node_modules/
+*.log
