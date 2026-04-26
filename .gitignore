@@ -1,6 +1,7 @@
-# Env files
+# Ignore env files anywhere
 .env
 .env.*
+**/.env
 
 # Kiro files
 .kiro/
@@ -28,3 +29,4 @@ __pycache__/
 *.pyc
 node_modules/
 *.log
+.vscode/

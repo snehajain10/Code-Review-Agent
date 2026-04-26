@@ -1,53 +1,54 @@
-// ── ADK API Config ──────────────────────────────────────────────────────────
-const ADK_BASE = "/adk";
-const APP_NAME = "my_agent";
-const USER_ID  = "ui_user";
+// ── Config ──────────────────────────────────────────────────────────────────
+const ADK_BASE  = "/adk";
+const APP_NAME  = "my_agent";
+const USER_ID   = "ui_user";
 let   SESSION_ID = "";
-let   currentProject = "";
-let   rawOutputBuffer = "";
 
-// ── DOM Refs ────────────────────────────────────────────────────────────────
+// ── State — each section stores its result independently ────────────────────
+const results = {
+  security: null,
+  docker:   null,
+  tests:    null,
+};
+
+// ── DOM ──────────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
-// ── Server Health Check ─────────────────────────────────────────────────────
+// ── Server Health ────────────────────────────────────────────────────────────
 async function checkServer() {
   try {
     const r = await fetch(`${ADK_BASE}/list-apps`, { signal: AbortSignal.timeout(3000) });
     if (r.ok) {
-      $("serverStatus").className = "status-dot online";
-      $("serverStatusText").textContent = "ADK Online";
+      $("statusDot").className  = "status-indicator online";
+      $("statusText").textContent = "ADK Online";
       return true;
     }
   } catch {}
-  $("serverStatus").className = "status-dot offline";
-  $("serverStatusText").textContent = "ADK Offline";
+  $("statusDot").className  = "status-indicator offline";
+  $("statusText").textContent = "ADK Offline";
   return false;
 }
+
+// ── Session ──────────────────────────────────────────────────────────────────
 async function createSession() {
-  SESSION_ID = "session_" + Date.now();
+  SESSION_ID = "s_" + Date.now();
   const r = await fetch(
     `${ADK_BASE}/apps/${APP_NAME}/users/${USER_ID}/sessions/${SESSION_ID}`,
     { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
   );
   if (!r.ok) {
-    const txt = await r.text();
-    // Session already exists is fine — reuse it
-    if (!txt.includes("already exists")) {
-      throw new Error(`Session creation failed: ${txt}`);
-    }
+    const t = await r.text();
+    if (!t.includes("already exists")) throw new Error("Session failed: " + t);
   }
 }
 
-// ── Send Message to ADK ─────────────────────────────────────────────────────
+// ── Send Message ─────────────────────────────────────────────────────────────
 async function sendMessage(text, retries = 4) {
   const body = {
-    app_name:   APP_NAME,
-    user_id:    USER_ID,
-    session_id: SESSION_ID,
-    new_message: {
-      role: "user",
-      parts: [{ text }]
-    }
+    app_name:    APP_NAME,
+    user_id:     USER_ID,
+    session_id:  SESSION_ID,
+    new_message: { role: "user", parts: [{ text }] }
   };
 
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -67,266 +68,275 @@ async function sendMessage(text, retries = 4) {
           }
         }
       }
-      return response;
+      return response || "No response received.";
     }
 
     const errText = await r.text();
 
     if (r.status === 500 && (errText.includes("RateLimitError") || errText.includes("rate_limit") || errText.includes("Internal Server Error"))) {
-      const waitSec = 15 * (attempt + 1);
-      showSpinner(`Rate limit hit. Waiting ${waitSec}s then retrying (${attempt + 1}/${retries})...`);
-      await new Promise(res => setTimeout(res, waitSec * 1000));
+      const wait = 15 * (attempt + 1);
+      setLoadingText("Rate limit hit. Waiting " + wait + "s then retrying (" + (attempt + 1) + "/" + retries + ")...");
+      await new Promise(res => setTimeout(res, wait * 1000));
       continue;
     }
 
-    if (errText.includes("RESOURCE_EXHAUSTED") || errText.includes("429")) {
-      throw new Error("API quota exceeded. Please wait a minute and try again.");
-    }
-    if (r.status === 404) {
-      throw new Error("Agent not found. Make sure ADK server is running from the workspace root.");
-    }
-    throw new Error(`Server error ${r.status}: ${errText.slice(0, 200)}`);
+    if (r.status === 404) throw new Error("Agent not found. Make sure ADK server is running from the workspace root.");
+    throw new Error("Server error " + r.status + ": " + errText.slice(0, 200));
   }
 
   throw new Error("Rate limit: too many retries. Please wait 1-2 minutes and try again.");
 }
 
-// ── Format Output ───────────────────────────────────────────────────────────
-function formatOutput(text) {
+// ── Format Output ─────────────────────────────────────────────────────────────
+function format(text) {
   if (!text) return "<em style='color:var(--text2)'>No response received.</em>";
 
-  // Strip all emoji characters
+  // Strip emojis
   text = text.replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27BF}]|[\u{2300}-\u{23FF}]|[\u{2B00}-\u{2BFF}]|[\u{FE00}-\u{FEFF}]/gu, "").trim();
 
-  let html = text
+  return text
     .replace(/^### (.+)$/gm, "<h3>$1</h3>")
     .replace(/^## (.+)$/gm,  "<h3>$1</h3>")
+    .replace(/^# (.+)$/gm,   "<h3>$1</h3>")
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/PASS|passed/gi, '<span class="badge-pass">$&</span>')
-    .replace(/FAIL|failed/gi, '<span class="badge-fail">$&</span>')
-    .replace(/WARN|warning/gi, '<span class="badge-warn">$&</span>')
-    .replace(/```[\w]*\n?([\s\S]*?)```/g, "<pre style='background:var(--bg);padding:12px;border-radius:6px;overflow-x:auto;font-size:12px;margin:8px 0;border:1px solid var(--border)'>$1</pre>")
-    .replace(/`([^`]+)`/g, "<code style='background:var(--bg);padding:2px 6px;border-radius:4px;font-size:12px;color:var(--accent-h)'>$1</code>")
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/```[\w]*\n?([\s\S]*?)```/g, "<pre>$1</pre>")
+    .replace(/\bPASS(ED)?\b/gi, '<span class="pass">$&</span>')
+    .replace(/\bFAIL(ED)?\b/gi, '<span class="fail">$&</span>')
+    .replace(/\bERROR\b/gi,     '<span class="fail">$&</span>')
     .replace(/^---+$/gm, "<hr>")
     .replace(/\n/g, "<br>");
-
-  return html;
 }
 
-// ── Pipeline Step State ─────────────────────────────────────────────────────
+// ── Pipeline step helper ──────────────────────────────────────────────────────
 function setPipelineStep(id, state, statusText) {
   const el = $(id);
-  el.className = "pipeline-step " + state;
-  el.querySelector(".ps-status").textContent = statusText;
+  if (!el) return;
+  el.className = "pipeline-step " + (state || "");
+  const s = $( id + "-status");
+  if (s) s.textContent = statusText;
 }
 
-// ── Show/Hide Spinner ───────────────────────────────────────────────────────
-function showSpinner(text = "Processing...") {
-  $("spinner").classList.remove("hidden");
-  $("spinnerText").textContent = text;
-}
-function hideSpinner() {
-  $("spinner").classList.add("hidden");
-}
-
-// ── Show Output ─────────────────────────────────────────────────────────────
-function showOutput(text) {
-  rawOutputBuffer = text;
-  $("outputFormatted").innerHTML = formatOutput(text);
-  $("outputRaw").textContent = text;
-  $("stepOutput").classList.remove("hidden");
-  hideSpinner();
+// ── Loading helpers ───────────────────────────────────────────────────────────
+function setLoadingText(text) {
+  ["securityLoadingText","dockerLoadingText","testsLoadingText"].forEach(id => {
+    const el = $(id);
+    if (el) el.textContent = text;
+  });
 }
 
-// ── Build Summary ───────────────────────────────────────────────────────────
-function buildSummary(results) {
-  const rows = results.map(r =>
-    `<tr>
-      <td>${r.step}</td>
-      <td>${r.status}</td>
-      <td style="color:var(--text2);font-size:12px">${r.note || ""}</td>
-    </tr>`
-  ).join("");
-
-  $("summaryContent").innerHTML = `
-    <table class="summary-table">
-      <thead><tr><th>Step</th><th>Status</th><th>Notes</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-  $("stepSummary").classList.remove("hidden");
+function showLoading(panel, text) {
+  const loading = $(panel + "Loading");
+  const loadingText = $(panel + "LoadingText");
+  const content = $(panel + "Content");
+  if (loading) loading.classList.remove("hidden");
+  if (loadingText) loadingText.textContent = text;
+  if (content) {
+    const ls = content.querySelector(".loading-state");
+    if (ls) ls.classList.remove("hidden");
+  }
+  setNavState(panel, "running");
+  setPanelStatus(panel, "running", "Running...");
 }
 
-// ── Tab Switching ───────────────────────────────────────────────────────────
-document.querySelectorAll(".tab-btn").forEach(btn => {
+function hideLoading(panel) {
+  const el = $(panel + "Loading");
+  if (el) el.classList.add("hidden");
+}
+
+function setPanelStatus(panel, state, text) {
+  const el = $(panel + "Status");
+  if (!el) return;
+  el.className = "panel-status " + state;
+  el.textContent = text;
+}
+
+function setNavState(panel, state) {
+  const btn = document.querySelector(`[data-panel="${panel}"]`);
+  if (!btn) return;
+  btn.classList.remove("done", "running");
+  if (state) btn.classList.add(state);
+}
+
+// ── Show a result panel ───────────────────────────────────────────────────────
+function showPanel(panel) {
+  // Hide all result panels
+  document.querySelectorAll(".result-panel").forEach(p => p.classList.add("hidden"));
+  // Build the panel ID
+  const panelId = "panel" + panel.charAt(0).toUpperCase() + panel.slice(1);
+  const el = $(panelId);
+  if (el) el.classList.remove("hidden");
+  // Update nav active state
+  document.querySelectorAll(".result-nav-btn").forEach(b => b.classList.remove("active"));
+  const btn = document.querySelector(`[data-panel="${panel}"]`);
+  if (btn) btn.classList.add("active");
+}
+
+function setResult(panel, text) {
+  results[panel] = text;
+  const content = $(panel + "Content");
+  if (content) content.innerHTML = format(text);
+  hideLoading(panel);
+  setNavState(panel, "done");
+  setPanelStatus(panel, "done", "Complete");
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+document.querySelectorAll(".itab").forEach(btn => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-    document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+    document.querySelectorAll(".itab").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".itab-content").forEach(c => c.classList.remove("active"));
     btn.classList.add("active");
     $("tab-" + btn.dataset.tab).classList.add("active");
   });
 });
 
-document.querySelectorAll(".out-tab").forEach(btn => {
+// ── Sidebar results nav ───────────────────────────────────────────────────────
+document.querySelectorAll(".result-nav-btn").forEach(btn => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".out-tab").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    if (btn.dataset.out === "formatted") {
-      $("outputFormatted").classList.remove("hidden");
-      $("outputRaw").classList.add("hidden");
-    } else {
-      $("outputFormatted").classList.add("hidden");
-      $("outputRaw").classList.remove("hidden");
-    }
+    showPanel(btn.dataset.panel);
   });
 });
 
-// ── Start Analysis ──────────────────────────────────────────────────────────
-$("btnStart").addEventListener("click", async () => {
-  const activeTab = document.querySelector(".tab-btn.active").dataset.tab;
+// ── Start Analysis ────────────────────────────────────────────────────────────
+$("btnAnalyze").addEventListener("click", async () => {
+  const activeTab = document.querySelector(".itab.active").dataset.tab;
   const input = activeTab === "local"
     ? $("localPath").value.trim()
     : $("githubUrl").value.trim();
 
-  if (!input) {
-    alert("Please enter a project path or GitHub URL.");
-    return;
-  }
+  if (!input) { alert("Please enter a project path or GitHub URL."); return; }
 
   const online = await checkServer();
   if (!online) {
-    alert("ADK server is not running.\n\nStart it with:\n  adk api_server\n\nfrom the workspace root.");
+    alert("ADK server is not running.\n\nRun: adk api_server --port=8000\nThen: python ui/serve.py");
     return;
   }
 
-  currentProject = input;
-  $("stepPipeline").classList.remove("hidden");
-  $("stepOutput").classList.remove("hidden");
-  $("stepSummary").classList.add("hidden");
-  $("actionGrid").classList.add("hidden");
-  $("outputFormatted").innerHTML = "";
-  rawOutputBuffer = "";
-
-  showSpinner("Creating session...");
-  await createSession();
-
-  // Determine message
-  const isGithub = input.includes("github.com") || /^[\w-]+\/[\w-]+$/.test(input);
-  const message = isGithub
-    ? `Please analyze this GitHub repository: ${input}`
-    : `Please review the project at: ${input}`;
-
-  setPipelineStep("ps-scan", "active", "scanning...");
-  showSpinner("Scanning project...");
+  $("btnAnalyze").disabled = true;
+  $("btnAnalyze").textContent = "Scanning...";
 
   try {
-    const response = await sendMessage(message);
-    setPipelineStep("ps-scan", "done", "done ✅");
-    showOutput(response);
-    $("actionGrid").classList.remove("hidden");
+    await createSession();
+    setPipelineStep("ps-scan", "active", "scanning...");
+    const isGithub = input.includes("github.com") || /^[\w-]+\/[\w-]+$/.test(input);
+    const msg = isGithub
+      ? "Please analyze this GitHub repository: " + input
+      : "Please review the project at: " + input;
+
+    const response = await sendMessage(msg);
+    setPipelineStep("ps-scan", "done", "done");
+
+    // Show results nav and step actions
+    $("resultsNav").classList.remove("hidden");
+    $("stepActions").classList.remove("hidden");
+
+    // Show a scan summary in security panel
+    $("panelSecurity").classList.remove("hidden");
+    $("securityContent").innerHTML = format(response);
+    $("securityLoading").classList.add("hidden");
+    setPanelStatus("security", "done", "Scan complete");
+    setNavState("security", "done");
+
+    // Scroll to security panel
+    $("panelSecurity").scrollIntoView({ behavior: "smooth" });
+
   } catch (err) {
-    setPipelineStep("ps-scan", "error", "error ❌");
-    showOutput("Error: " + err.message);
+    alert("Error: " + err.message);
+  } finally {
+    $("btnAnalyze").disabled = false;
+    $("btnAnalyze").textContent = "Start Analysis";
   }
 });
 
-// ── Security Button ─────────────────────────────────────────────────────────
+// ── Security Button ───────────────────────────────────────────────────────────
 $("btnSecurity").addEventListener("click", async () => {
-  setPipelineStep("ps-security", "active", "analyzing...");
-  showSpinner("Running security analysis...");
+  $("panelSecurity").classList.remove("hidden");
+  showPanel("security");
+  showLoading("security", "Running security analysis...");
+  setPipelineStep("ps-security", "active", "running...");
+
   try {
     const r = await sendMessage("Run the security analysis and generate documentation.");
-    setPipelineStep("ps-security", "done", "done ✅");
-    showOutput(r);
+    setResult("security", r);
+    setPipelineStep("ps-security", "done", "done");
   } catch (err) {
-    setPipelineStep("ps-security", "error", "error ❌");
-    showOutput("Error: " + err.message);
+    setResult("security", "Error: " + err.message);
+    setPanelStatus("security", "error", "Failed");
+    setNavState("security", "");
+    setPipelineStep("ps-security", "error", "error");
   }
 });
 
-// ── Docker Button ───────────────────────────────────────────────────────────
+// ── Docker Button ─────────────────────────────────────────────────────────────
 $("btnDocker").addEventListener("click", async () => {
-  setPipelineStep("ps-docker", "active", "building...");
-  showSpinner("Creating Dockerfile and building container...");
+  $("panelDocker").classList.remove("hidden");
+  showPanel("docker");
+  showLoading("docker", "Creating Dockerfile and building container...");
+  setPipelineStep("ps-docker", "active", "running...");
+
   try {
     const r = await sendMessage("Create the Dockerfile and run the container.");
-    setPipelineStep("ps-docker", "done", "done ✅");
-    showOutput(r);
+    setResult("docker", r);
+    setPipelineStep("ps-docker", "done", "done");
   } catch (err) {
-    setPipelineStep("ps-docker", "error", "error ❌");
-    showOutput("Error: " + err.message);
+    setResult("docker", "Error: " + err.message);
+    setPanelStatus("docker", "error", "Failed");
+    setNavState("docker", "");
+    setPipelineStep("ps-docker", "error", "error");
   }
 });
 
-// ── Tests Button ────────────────────────────────────────────────────────────
+// ── Tests Button ──────────────────────────────────────────────────────────────
 $("btnTests").addEventListener("click", async () => {
-  setPipelineStep("ps-tests", "active", "generating...");
-  showSpinner("Generating and running tests...");
+  $("panelTests").classList.remove("hidden");
+  showPanel("tests");
+  showLoading("tests", "Generating and running tests...");
+  setPipelineStep("ps-tests", "active", "running...");
+
   try {
     const r = await sendMessage("Generate tests for all edge cases and run them.");
-    setPipelineStep("ps-tests", "done", "done ✅");
-    showOutput(r);
+    setResult("tests", r);
+    setPipelineStep("ps-tests", "done", "done");
   } catch (err) {
-    setPipelineStep("ps-tests", "error", "error ❌");
-    showOutput("Error: " + err.message);
+    setResult("tests", "Error: " + err.message);
+    setPanelStatus("tests", "error", "Failed");
+    setNavState("tests", "");
+    setPipelineStep("ps-tests", "error", "error");
   }
 });
 
-// ── Run Everything ──────────────────────────────────────────────────────────
+// ── Run All ───────────────────────────────────────────────────────────────────
 $("btnAll").addEventListener("click", async () => {
   const steps = [
-    { id: "ps-security", msg: "Run the security analysis and generate documentation.", label: "Security Analysis", spinner: "Running security analysis..." },
-    { id: "ps-docker",   msg: "Create the Dockerfile and run the container.",          label: "Docker",           spinner: "Building Docker container..." },
-    { id: "ps-tests",    msg: "Generate tests for all edge cases and run them.",        label: "Tests",            spinner: "Generating and running tests..." },
+    { panel: "security", pipelineId: "ps-security", msg: "Run the security analysis and generate documentation.", loading: "Running security analysis..." },
+    { panel: "docker",   pipelineId: "ps-docker",   msg: "Create the Dockerfile and run the container.",          loading: "Building Docker container..." },
+    { panel: "tests",    pipelineId: "ps-tests",    msg: "Generate tests for all edge cases and run them.",        loading: "Generating and running tests..." },
   ];
 
-  const summaryResults = [];
-
   for (const step of steps) {
-    setPipelineStep(step.id, "active", "running...");
-    showSpinner(step.spinner);
+    $("panel" + step.panel.charAt(0).toUpperCase() + step.panel.slice(1)).classList.remove("hidden");
+    showPanel(step.panel);
+    showLoading(step.panel, step.loading);
+    setPipelineStep(step.pipelineId, "active", "running...");
+
     try {
       const r = await sendMessage(step.msg);
-      setPipelineStep(step.id, "done", "done ✅");
-      showOutput(r);
-      summaryResults.push({ step: step.label, status: "✅ Done", note: "" });
+      setResult(step.panel, r);
+      setPipelineStep(step.pipelineId, "done", "done");
     } catch (err) {
-      setPipelineStep(step.id, "error", "error ❌");
-      showOutput("Error in " + step.label + ": " + err.message);
-      summaryResults.push({ step: step.label, status: "❌ Failed", note: err.message });
+      setResult(step.panel, "Error: " + err.message);
+      setPanelStatus(step.panel, "error", "Failed");
+      setNavState(step.panel, "");
+      setPipelineStep(step.pipelineId, "error", "error");
       break;
     }
   }
-
-  buildSummary(summaryResults);
 });
 
-// ── Copy Output ─────────────────────────────────────────────────────────────
-$("btnCopy").addEventListener("click", () => {
-  navigator.clipboard.writeText(rawOutputBuffer).then(() => {
-    $("btnCopy").textContent = "✅ Copied!";
-    setTimeout(() => { $("btnCopy").textContent = "📋 Copy"; }, 2000);
-  });
-});
-
-// ── New Review ──────────────────────────────────────────────────────────────
-$("btnNewReview").addEventListener("click", () => {
-  $("localPath").value = "";
-  $("githubUrl").value = "";
-  $("stepPipeline").classList.add("hidden");
-  $("stepOutput").classList.add("hidden");
-  $("stepSummary").classList.add("hidden");
-  $("stepQuestion").classList.add("hidden");
-  ["ps-scan","ps-security","ps-docker","ps-tests"].forEach(id =>
-    setPipelineStep(id, "", "waiting")
-  );
-  SESSION_ID = "";
-  currentProject = "";
-});
-
-// ── Ask Question ────────────────────────────────────────────────────────────
-$("btnAskQuestion").addEventListener("click", () => {
-  $("stepQuestion").classList.remove("hidden");
-  $("stepQuestion").scrollIntoView({ behavior: "smooth" });
+// ── Questions ─────────────────────────────────────────────────────────────────
+$("navQuestions").addEventListener("click", () => {
+  showPanel("questions");
 });
 
 document.querySelectorAll(".quick-q").forEach(btn => {
@@ -339,13 +349,14 @@ document.querySelectorAll(".quick-q").forEach(btn => {
 $("btnAsk").addEventListener("click", async () => {
   const q = $("questionInput").value.trim();
   if (!q) return;
-  $("questionOutput").classList.remove("hidden");
-  $("questionOutput").innerHTML = "<em style='color:var(--text2)'>Thinking...</em>";
+  const out = $("questionOutput");
+  out.classList.remove("hidden");
+  out.innerHTML = "<div class='loading-state'><div class='spinner'></div><span>Thinking...</span></div>";
   try {
     const r = await sendMessage(q);
-    $("questionOutput").innerHTML = formatOutput(r);
+    out.innerHTML = format(r);
   } catch (err) {
-    $("questionOutput").innerHTML = "Error: " + err.message;
+    out.innerHTML = "Error: " + err.message;
   }
 });
 
@@ -353,14 +364,6 @@ $("questionInput").addEventListener("keydown", e => {
   if (e.key === "Enter") $("btnAsk").click();
 });
 
-// ── Nav ─────────────────────────────────────────────────────────────────────
-document.querySelectorAll(".nav-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-  });
-});
-
-// ── Init ────────────────────────────────────────────────────────────────────
+// ── Init ──────────────────────────────────────────────────────────────────────
 checkServer();
 setInterval(checkServer, 10000);

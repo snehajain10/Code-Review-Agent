@@ -1,26 +1,25 @@
 # Project Summary
-The project is a small utility that fetches user information from a remote API and performs a simple division operation.
+The project is a simple Python utility that queries a (fictional) API for user information and performs a basic division operation. It demonstrates HTTP requests with the `requests` library, SQL query construction, and elementary arithmetic.
 
-## Purpose
-The module demonstrates how to make HTTP requests and interact with a database via an SQL query (though the query is currently vulnerable).
+## Main Files
+- **main.py** – The core logic: `get_user` fetches user data, `divide` performs division.
+- **test_generated.py** – Auto‑generated pytest suite that tests the two functions.
 
-## Tech Stack
-- Python 3
-- `requests` library for HTTP calls.
-
-# File Structure
+## File Structure
 ```
 C:\Users\sj107\Code-Review\test_project
-│   main.py
-``` 
+├── main.py
+└── test_generated.py
+```
 
-# Security Findings
+## Security Findings
 | File | Line | Issue | Description |
 |------|------|-------|-------------|
-| main.py | 6 | Hardcoded password | The password variable contains a literal password that should not be exposed in code. |
-| main.py | 8 | SQL Injection | The SQL query concatenates user input directly, making the application vulnerable to injection attacks. |
-| main.py | 2 | TODO: input validation | No validation of `user_id` which could lead to further issues. |
-| main.py | 8 | SQL Injection | (duplicate) |
+| main.py | 5 | Hardcoded secret | The variable `password` contains a hard‑coded password `admin123`. |
+| main.py | 6 | SQL injection | The query string concatenates user input directly into the SQL command. |
+| main.py | 6 | SQL injection | The constructed query could allow arbitrary SQL execution if `user_id` is malicious. |
+| main.py | 7 | Potential misuse of external API | No authentication or validation of the API response. |
+| main.py | 9 | Division by zero | The `divide` function does not handle zero divisor, causing runtime exception. |
 
-# Dependency List
-requests
+## Dependency List
+- `requests`
