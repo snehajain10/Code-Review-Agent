@@ -81,16 +81,23 @@ docker_agent = LlmAgent(
 Steps:
 1. Use read_file to read requirements.txt.
 2. Find entry point: check main.py first, then app.py, then first .py file at root.
-3. Use write_file to create Dockerfile:
+3. Use read_file to read the entry point file and check if it starts a server (flask, fastapi, uvicorn, http.server, socketserver, etc.).
+4. Use write_file to create Dockerfile:
    FROM python:3.11-slim
    WORKDIR /app
    COPY . .
    RUN pip install --no-cache-dir -r requirements.txt
+   EXPOSE 8080  (only if it's a server)
    CMD ["python", "<entry_point>"]
-4. Use run_shell_command to run: docker build -t <folder_name_lowercase> <project_folder>
-5. If build succeeds, run: docker run --rm <image_name>
-6. If any step fails, analyze the error, fix Dockerfile or requirements.txt, retry up to 5 times.
-7. Reply: Dockerfile path, image name, build result, run output or error.
+5. Use run_shell_command to build: docker build -t <folder_name_lowercase> <project_folder>
+6. Run the container:
+   - If it's a server/web app: docker run -d -p 8080:8080 --name <image_name>_container <image_name>
+     Then verify it started: docker ps | grep <image_name>
+   - If it's a script: docker run <image_name>
+7. If any step fails, analyze the error, fix Dockerfile or requirements.txt, retry up to 5 times.
+8. Reply: Dockerfile path, image name, whether it's a server or script, build result, run output.
+   If server: tell user "Container is running in background. Access at http://localhost:8080"
+   If script: show the output of the script.
 """,
     tools=[read_file, write_file, run_shell_command],
 )
