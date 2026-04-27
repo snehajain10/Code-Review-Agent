@@ -27,17 +27,18 @@ _BASE = "https://openrouter.ai/api/v1"
 
 # Primary model — if rate limited, LiteLLM falls back to the next ones
 MODEL = LiteLlm(
-    model="openrouter/openai/gpt-oss-20b:free",
+    model="openrouter/openai/gpt-oss-120b:free",
     api_key=_KEY,
     api_base=_BASE,
+    extra_body={"thinking": {"type": "disabled"}},
 )
 
 # Configure LiteLLM fallbacks for rate limit resilience
 litellm.set_verbose = False
 litellm.fallbacks = [
     {
-        "openrouter/openai/gpt-oss-20b:free": [
-            "openrouter/openai/gpt-oss-120b:free",
+        "openrouter/openai/gpt-oss-120b:free": [
+            "openrouter/openai/gpt-oss-20b:free",
             "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
         ]
     }
